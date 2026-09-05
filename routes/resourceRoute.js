@@ -7,5 +7,5 @@ import { getProjectResources } from "../utils/getResource.js"
 export const resourceRouter = express.Router()
 
 resourceRouter.post("/resource", auth, createResource)
-resourceRouter.post("/resource:resourceId", auth, removeResource)
+resourceRouter.delete("/resource/:resourceId", auth, removeResource)
 resourceRouter.get("/resource", auth, getProjectResources)
