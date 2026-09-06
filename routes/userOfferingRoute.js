@@ -6,6 +6,6 @@ import { auth } from "../middleware/auth.js"
 export const userOfferingRouter = express.Router()
 
 
-userOfferingRouter.post("/:slug/signup", signUp)
-userOfferingRouter.post("/:slug/login", login)
-userOfferingRouter.post("/:slug/logout", auth, logout)
+userOfferingRouter.post("/:slug/auth/signup", signUp)
+userOfferingRouter.post("/:slug/auth/login", login)
+userOfferingRouter.post("/:slug/auth/logout", auth, logout)
