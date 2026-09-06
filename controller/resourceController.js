@@ -3,6 +3,52 @@ import Project from "../models/project.js";
 import Resource from "../models/resource.js";
 import { validatePrompt } from "../utils/LLMService.js";
 
+// Builds a standard 5-endpoint REST spec from validated resource data
+const buildSpec = (resource, requiredFields, properties) => {
+  const resourceName = resource.toLowerCase().trim();
+  const singular = resourceName.endsWith("s")
+    ? resourceName.slice(0, -1)
+    : resourceName;
+
+  return {
+    resource: resourceName,
+    endpoints: [
+      {
+        method: "GET",
+        path: `/${resourceName}`,
+        description: `Retrieve all ${resourceName}`,
+        properties,
+      },
+      {
+        method: "GET",
+        path: `/${resourceName}/:id`,
+        description: `Retrieve a single ${singular} by ID`,
+        properties,
+      },
+      {
+        method: "POST",
+        path: `/${resourceName}`,
+        description: `Create a new ${singular}`,
+        requiredFields,
+        properties,
+      },
+      {
+        method: "PUT",
+        path: `/${resourceName}/:id`,
+        description: `Update an existing ${singular} by ID`,
+        requiredFields,
+        properties,
+      },
+      {
+        method: "DELETE",
+        path: `/${resourceName}/:id`,
+        description: `Delete a ${singular} by ID`,
+        properties: [{ fieldName: "id", fieldType: "string" }],
+      },
+    ],
+  };
+};
+
 export const createResource = async (req, res) => {
   try {
     const { projectId, description } = req.body;
@@ -46,16 +92,9 @@ export const createResource = async (req, res) => {
       });
     }
 
-    // Generate specs for all resources
-    const specs = await Promise.all(
-      validation.resources.map((item) =>
-        getSpec(
-          item.resource,
-          item.requiredFields,
-          item.properties,
-          description
-        )
-      )
+    // Build specs locally — no extra API call needed
+    const specs = validation.resources.map((item) =>
+      buildSpec(item.resource, item.requiredFields, item.properties)
     );
 
     // Validate that every generated spec has a resource name
@@ -175,6 +214,53 @@ export const removeResource = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: err.message || "An error occurred while deleting the resource",
+    });
+  }
+};
+
+export const getProjectResources = async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    const userId = req.user.id;
+
+    // Verify project exists and belongs to this user
+    const project = await Project.findOne({ _id: projectId, userId });
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found or unauthorized",
+      });
+    }
+
+    // Fetch all resources for this project
+    const resources = await Resource.find({ projectId: project._id }).sort({
+      createdAt: -1,
+    });
+
+    const host = req.get("host");
+    const protocol = req.protocol;
+    const baseUrl = `${protocol}://${host}/m/${project.slug}`;
+
+    return res.status(200).json({
+      success: true,
+      project: {
+        id: project._id,
+        name: project.name,
+        slug: project.slug,
+      },
+      count: resources.length,
+      resources: resources.map((r) => ({
+        id: r._id,
+        name: r.name,
+        mockUrl: `${baseUrl}/${r.name}`,
+        endpoints: r.spec?.endpoints || [],
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
     });
   }
 };
