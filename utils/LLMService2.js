@@ -1,18 +1,22 @@
 import "dotenv/config";
 
-// Robust JSON extraction helper
+// Safe JSON extraction: returns null instead of throwing unhandled exceptions
 const extractJSON = (text) => {
-    if (!text) throw new Error("Empty response received from model");
+    if (!text) return null;
 
     const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
     const firstBrace = cleaned.indexOf("{");
     const lastBrace = cleaned.lastIndexOf("}");
 
     if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-        throw new Error(`Model output did not contain a valid JSON object. Raw: "${text}"`);
+        return null;
     }
 
-    return JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+    try {
+        return JSON.parse(cleaned.substring(firstBrace, lastBrace + 1));
+    } catch {
+        return null;
+    }
 };
 
 const SYSTEM_PROMPT = `You are a strict REST API architect and schema validator.
@@ -64,36 +68,8 @@ For a valid prompt, return:
   ]
 }`;
 
-export const validatePrompt = async (userPrompt) => {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${process.env.API_KEY}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": process.env.CLIENT_URL || "http://localhost:8000",
-            "X-Title": "MockAPI Generator",
-        },
-        body: JSON.stringify({
-            model: "openrouter/free",
-            messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: userPrompt },
-            ],
-            response_format: { type: "json_object" },
-            temperature: 0.1,
-        }),
-    });
-
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`OpenRouter API error (${response.status}): ${errText}`);
-    }
-
-    const data = await response.json();
-    const rawText = data.choices?.[0]?.message?.content?.trim();
-    const parsed = extractJSON(rawText);
-
-    if (!parsed.valid || !Array.isArray(parsed.resources) || parsed.resources.length === 0) {
+export const validatePrompt = async (promptText) => {
+    if (!promptText || typeof promptText !== "string" || !promptText.trim()) {
         return {
             valid: false,
             resourceCount: 0,
@@ -101,7 +77,56 @@ export const validatePrompt = async (userPrompt) => {
         };
     }
 
-    // Sanitize strictly what was validated and returned by the LLM
+    // Free tier fallback chain avoiding safety-only checkpoints
+    const candidateModels = [
+        "google/gemma-4-31b:free",
+        "minimax/minimax-m3:free",
+        "openrouter/free",
+    ];
+
+    let parsed = null;
+
+    for (const model of candidateModels) {
+        try {
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${process.env.API_KEY}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": process.env.CLIENT_URL || "http://localhost:8000",
+                    "X-Title": "MockAPI Generator",
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        { role: "system", content: SYSTEM_PROMPT },
+                        { role: "user", content: promptText },
+                    ],
+                    response_format: { type: "json_object" },
+                    temperature: 0.1,
+                }),
+            });
+
+            if (!response.ok) continue;
+
+            const data = await response.json();
+            const rawText = data.choices?.[0]?.message?.content?.trim();
+            parsed = extractJSON(rawText);
+
+            if (parsed) break;
+        } catch {
+            continue;
+        }
+    }
+
+    if (!parsed || !parsed.valid || !Array.isArray(parsed.resources) || parsed.resources.length === 0) {
+        return {
+            valid: false,
+            resourceCount: 0,
+            resources: [],
+        };
+    }
+
     const sanitizedResources = parsed.resources.map((item) => {
         const resourceName = (item.resource || "items")
             .toLowerCase()

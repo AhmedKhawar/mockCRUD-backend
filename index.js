@@ -19,11 +19,10 @@ app.use("/api", projectRouter)
 app.use("/api", resourceRouter)
 app.use("/m", apiRouter)
 
-
 app.get("/", (req, res) => {
-    return res.json({
-        "msg": "Hello from Server"
-    })
+  return res.json({
+    "msg": "Hello from Server"
+  })
 })
 
 // Listen locally only (Vercel handles this in production)
