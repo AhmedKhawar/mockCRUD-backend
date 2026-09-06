@@ -62,8 +62,8 @@ export const createResource = async (req, res) => {
     // Validate that every generated spec has a resource name
     const invalidSpec = specs.find(
       (item) =>
-        !item.resourceName ||
-        item.resourceName.toLowerCase().trim() === ""
+        !item.resource ||
+        item.resource.toLowerCase().trim() === ""
     );
 
     if (invalidSpec) {
@@ -75,7 +75,7 @@ export const createResource = async (req, res) => {
 
     // Normalize resource names
     const resourceNames = specs.map(
-      (item) => item.resourceName.toLowerCase().trim()
+      (item) => item.resource.toLowerCase().trim()
     );
 
     // Check for duplicate resource names within this request
