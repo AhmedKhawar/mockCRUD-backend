@@ -19,7 +19,7 @@ app.use("/api", userRouter)
 app.use("/api", projectRouter)
 app.use("/api", resourceRouter)
 app.use("/m", apiRouter)
-app.use("/m", userOfferingRouter)
+app.use("/", userOfferingRouter)
 
 app.get("/", (req, res) => {
   return res.json({
