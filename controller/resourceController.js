@@ -2,6 +2,7 @@ import MockData from "../models/mock_data.js";
 import Project from "../models/project.js";
 import Resource from "../models/resource.js";
 import { getSpec } from "../utils/LLMService.js";
+import { validatePrompt } from "../utils/LLMService2.js";
 
 export const createResource = async (req, res) => {
   try {
@@ -30,6 +31,8 @@ export const createResource = async (req, res) => {
       });
     }
 
+    const res = await validatePrompt(description)
+    console.log(res)
     // Generate spec using your gemini helper
     const spec = await getSpec(description);
 
