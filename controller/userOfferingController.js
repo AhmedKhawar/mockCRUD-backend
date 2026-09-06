@@ -22,10 +22,10 @@ export const signUp = async (req, res) => {
 
         const { email, password, name, dob } = req.body;
 
-        if (!email || !password || !name || !dob) {
+        if (!email || !password || !name) {
             return res.status(400).json({
                 success: false,
-                message: "Email, password, name, and date of birth are required",
+                message: "Email, password, and name are required",
             });
         }
 
@@ -48,7 +48,7 @@ export const signUp = async (req, res) => {
             dob,
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             message: "User registered successfully",
             user: {
@@ -59,7 +59,15 @@ export const signUp = async (req, res) => {
             },
         });
     } catch (error) {
-        res.status(500).json({
+        // Catch race-condition collisions caught by the database compound index
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: "User already exists in this project",
+            });
+        }
+
+        return res.status(500).json({
             success: false,
             message: error.message,
         });
