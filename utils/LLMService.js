@@ -4,124 +4,208 @@ import "dotenv/config";
 const extractJSON = (text) => {
   if (!text) throw new Error("Empty response received from model");
 
-  // 1. Strip markdown code fences if present
-  let cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+  let cleaned = text
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/g, "")
+    .trim();
 
-  // 2. Find the outermost JSON object bounds
   const firstBrace = cleaned.indexOf("{");
   const lastBrace = cleaned.lastIndexOf("}");
 
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    throw new Error(`Model output did not contain a valid JSON object. Raw: "${text}"`);
+  if (
+    firstBrace === -1 ||
+    lastBrace === -1 ||
+    lastBrace <= firstBrace
+  ) {
+    throw new Error(
+      `Model output did not contain a valid JSON object. Raw: "${text}"`
+    );
   }
 
-  // 3. Slice strictly the JSON substring, ignoring any safety prefixes or suffixes
   const jsonSubstring = cleaned.substring(firstBrace, lastBrace + 1);
+
   return JSON.parse(jsonSubstring);
 };
 
-export const getSpec = async (desc) => {
+
+export const getSpec = async (
+  resource,
+  requiredFields,
+  properties,
+  description
+) => {
+
   const systemPrompt = `You are a strict REST API architect.
-Extract the resource schema from the description and return valid JSON matching this exact structure:
+
+Generate REST API endpoints for the resource provided by the user.
+
+The resource name, required fields, and properties have already been determined.
+DO NOT change, add, remove, or rename any fields or properties.
+
+Return valid JSON matching this exact structure:
+
 {
   "resource": "lowercase_plural_name",
-  "requiredFields": ["field1", "field2"],
-  "properties": [
-    { "fieldName": "field1", "fieldType": "string|number|boolean|array|object" }
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/resource",
+      "description": "Retrieve all resources",
+      "properties": [
+        {
+          "fieldName": "field1",
+          "fieldType": "string"
+        }
+      ]
+    }
   ]
 }
+
 Rules:
 - Output valid raw JSON only.
-- Do NOT output preamble, explanations, or safety notes (e.g., do not say "User Safety: safe").
-- Resource name must strictly be a single lowercase plural word.
-- Field names in properties and requiredFields must strictly be single alphanumeric identifier words (no spaces, no tokens).
-- Every entry in requiredFields must strictly match an existing fieldName in the properties list.`;
+- Do NOT output preamble, explanations, or safety notes.
+- The "resource" value must be exactly the resource provided.
+- The properties must be exactly the properties provided.
+- The requiredFields must be exactly the requiredFields provided.
+- Generate the standard REST endpoints:
+  1. GET /resource
+  2. GET /resource/:id
+  3. POST /resource
+  4. PUT /resource/:id
+  5. DELETE /resource/:id
+- POST and PUT endpoints must contain the provided requiredFields.
+- GET endpoints should contain the provided properties.
+- DELETE should contain only the id property.
+- Do not create an "id" field in the POST, PUT, or GET resource properties.
+- The final JSON structure must remain exactly:
+  resource + endpoints.
+`;
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${process.env.API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:8000",
-      "X-Title": "MockAPI Generator",
-    },
-    body: JSON.stringify({
-      model: "openrouter/free",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: `Extract the resource schema based on this description: "${desc}"` },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.1,
-    }),
-  });
+
+  const userPrompt = `
+Description:
+"${description}"
+
+Resource:
+${resource}
+
+Required fields:
+${JSON.stringify(requiredFields)}
+
+Properties:
+${JSON.stringify(properties)}
+`;
+
+
+  const response = await fetch(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:8000",
+        "X-Title": "MockAPI Generator",
+      },
+      body: JSON.stringify({
+        model: "openrouter/free",
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: userPrompt,
+          },
+        ],
+        response_format: {
+          type: "json_object",
+        },
+        temperature: 0.1,
+      }),
+    }
+  );
+
 
   if (!response.ok) {
     const errorData = await response.text();
-    throw new Error(`OpenRouter API error (${response.status}): ${errorData}`);
+
+    throw new Error(
+      `OpenRouter API error (${response.status}): ${errorData}`
+    );
   }
 
-  const data = await response.json();
-  const rawText = data.choices?.[0]?.message?.content?.trim();
 
-  // Safely parse using the slice extractor
+  const data = await response.json();
+
+  const rawText =
+    data.choices?.[0]?.message?.content?.trim();
+
+
   const parsed = extractJSON(rawText);
 
-  // 1. Sanitize resource name
-  const resource = (parsed.resource || "items").toLowerCase().trim().split(/\s+/)[0];
 
-  // 2. Sanitize property field names
-  const properties = (parsed.properties || [])
-    .map((prop) => ({
-      fieldName: typeof prop.fieldName === "string" ? prop.fieldName.trim().split(/\s+/)[0] : "",
-      fieldType: prop.fieldType || "string",
-    }))
-    .filter((prop) => prop.fieldName.length > 0);
+  // Keep the resource exactly as provided
+  const resourceName = resource.toLowerCase().trim();
 
-  // 3. Build set of valid fields and sanitize requiredFields
-  const validFields = new Set(properties.map((p) => p.fieldName));
-  const requiredFields = (parsed.requiredFields || [])
-    .map((f) => (typeof f === "string" ? f.trim().split(/\s+/)[0] : ""))
-    .filter((f) => f.length > 0 && validFields.has(f));
 
-  // 4. Construct the 5 endpoints
+  // Keep the provided properties exactly as they are
+  const endpointProperties = properties;
+
+
+  // Construct the same 5 endpoints
   const endpoints = [
     {
       method: "GET",
-      path: `/${resource}`,
-      description: `Retrieve all ${resource}`,
-      properties,
+      path: `/${resourceName}`,
+      description: `Retrieve all ${resourceName}`,
+      properties: endpointProperties,
     },
+
     {
       method: "GET",
-      path: `/${resource}/:id`,
-      description: `Retrieve a single ${resource.slice(0, -1) || resource} by ID`,
-      properties,
+      path: `/${resourceName}/:id`,
+      description: `Retrieve a single ${resourceName.slice(0, -1) || resourceName
+        } by ID`,
+      properties: endpointProperties,
     },
+
     {
       method: "POST",
-      path: `/${resource}`,
-      description: `Create a new ${resource.slice(0, -1) || resource}`,
+      path: `/${resourceName}`,
+      description: `Create a new ${resourceName.slice(0, -1) || resourceName
+        }`,
       requiredFields,
-      properties,
+      properties: endpointProperties,
     },
+
     {
       method: "PUT",
-      path: `/${resource}/:id`,
-      description: `Update an existing ${resource.slice(0, -1) || resource} by ID`,
+      path: `/${resourceName}/:id`,
+      description: `Update an existing ${resourceName.slice(0, -1) || resourceName
+        } by ID`,
       requiredFields,
-      properties,
+      properties: endpointProperties,
     },
+
     {
       method: "DELETE",
-      path: `/${resource}/:id`,
-      description: `Delete a ${resource.slice(0, -1) || resource} by ID`,
-      properties: [{ fieldName: "id", fieldType: "string" }],
+      path: `/${resourceName}/:id`,
+      description: `Delete a ${resourceName.slice(0, -1) || resourceName
+        } by ID`,
+      properties: [
+        {
+          fieldName: "id",
+          fieldType: "string",
+        },
+      ],
     },
   ];
 
+
   return {
-    resource,
+    resource: resourceName,
     endpoints,
   };
 };

@@ -2,11 +2,13 @@ import MockData from "../models/mock_data.js";
 import Project from "../models/project.js";
 import Resource from "../models/resource.js";
 import { getSpec } from "../utils/LLMService.js";
+import { validatePrompt } from "../utils/LLMService2.js";
 
 export const createResource = async (req, res) => {
   try {
     const { projectId, description } = req.body;
 
+    // Validate project ID
     if (!projectId) {
       return res.status(400).json({
         success: false,
@@ -14,6 +16,7 @@ export const createResource = async (req, res) => {
       });
     }
 
+    // Validate description
     if (!description || !description.trim()) {
       return res.status(400).json({
         success: false,
@@ -21,8 +24,12 @@ export const createResource = async (req, res) => {
       });
     }
 
-    // Verify project exists and belongs to the authenticated user
-    const project = await Project.findOne({ _id: projectId, userId: req.user.id });
+    // Verify project exists and belongs to authenticated user
+    const project = await Project.findOne({
+      _id: projectId,
+      userId: req.user.id,
+    });
+
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -30,46 +37,91 @@ export const createResource = async (req, res) => {
       });
     }
 
-    // Generate spec using your gemini helper
-    const spec = await getSpec(description);
+    // Validate the user's prompt
+    const validation = await validatePrompt(description);
 
-    const resourceName = (spec.resource || spec.name || "").toLowerCase().trim();
-    if (!resourceName) {
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid API endpoint description",
+      });
+    }
+
+    // Generate specs for all resources
+    const specs = await Promise.all(
+      validation.resources.map((item) =>
+        getSpec(
+          item.resource,
+          item.requiredFields,
+          item.properties,
+          description
+        )
+      )
+    );
+
+    // Validate that every generated spec has a resource name
+    const invalidSpec = specs.find(
+      (item) =>
+        !item.resourceName ||
+        item.resourceName.toLowerCase().trim() === ""
+    );
+
+    if (invalidSpec) {
       return res.status(422).json({
         success: false,
         message: "Failed to resolve a valid resource name from prompt",
       });
     }
 
-    // Check if resource already exists in this project
-    const existingResource = await Resource.findOne({
-      projectId: project._id,
-      name: resourceName,
-    });
+    // Normalize resource names
+    const resourceNames = specs.map(
+      (item) => item.resourceName.toLowerCase().trim()
+    );
 
-    if (existingResource) {
+    // Check for duplicate resource names within this request
+    const uniqueNames = new Set(resourceNames);
+
+    if (uniqueNames.size !== resourceNames.length) {
       return res.status(409).json({
         success: false,
-        message: `Resource '${resourceName}' already exists in this project`,
+        message: "Duplicate resource names were generated",
       });
     }
 
-    // Create the resource record linked by projectId
-    const newResource = await Resource.create({
+    // Check if any resource already exists in this project
+    const existingResources = await Resource.find({
       projectId: project._id,
-      name: resourceName,
-      spec,
-    });
+      name: { $in: resourceNames },
+    }).select("name");
 
+    if (existingResources.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Resource(s) already exist: ${existingResources
+          .map((item) => item.name)
+          .join(", ")}`,
+      });
+    }
+
+    // Create all resources
+    const newResources = await Resource.insertMany(
+      specs.map((spec, index) => ({
+        projectId: project._id,
+        name: resourceNames[index],
+        spec,
+      }))
+    );
+
+    // Return created resources
     return res.status(201).json({
       success: true,
-      message: "Resource created successfully",
-      resource: {
-        id: newResource._id,
-        projectId: newResource.projectId,
-        name: newResource.name,
-        spec: newResource.spec,
-      },
+      message: "Resources created successfully",
+      resources: newResources.map((resource) => ({
+        id: resource._id,
+        projectId: resource.projectId,
+        name: resource.name,
+        spec: resource.spec,
+      })),
     });
   } catch (err) {
     return res.status(500).json({
