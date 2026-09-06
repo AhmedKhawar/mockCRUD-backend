@@ -1,7 +1,6 @@
 import express from "express"
 import { auth } from "../middleware/auth.js"
-import { createProject, removeProject } from "../controller/projectController.js"
-import { getUserProjects } from "../utils/getProjects.js"
+import { createProject, getUserProjects, removeProject } from "../controller/projectController.js"
 
 export const projectRouter = express.Router()
 

@@ -1,7 +1,7 @@
 import express from "express"
-import { createResource, removeResource } from "../controller/resourceController.js"
+import { createResource, getProjectResources, removeResource } from "../controller/resourceController.js"
 import { auth } from "../middleware/auth.js"
-import { getProjectResources } from "../utils/getResource.js"
+
 
 
 export const resourceRouter = express.Router()
