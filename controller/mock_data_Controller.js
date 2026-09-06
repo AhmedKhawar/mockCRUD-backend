@@ -40,8 +40,7 @@ export const mockAPI = async (req, res) => {
 
     // 4. If resource requires auth, verify the Bearer token
     if (resourceDoc.auth) {
-      const authHeader = req.headers.authorization;
-      const token = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+      const token = req.headers.authorization?.split(" ")[1];
 
       if (!token) {
         return res.status(401).json({ error: "This resource requires authentication. No token provided." });
