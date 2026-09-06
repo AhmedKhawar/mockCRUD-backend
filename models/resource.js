@@ -8,6 +8,11 @@ const resourceSchema = new Schema(
       required: [true, "Project ID is required"],
     },
 
+    auth: {
+      type: Boolean,
+      default: false
+    },
+
     name: {
       type: String,
       required: [true, "Resource name is required"],

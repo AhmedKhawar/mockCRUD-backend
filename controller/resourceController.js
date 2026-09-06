@@ -252,10 +252,54 @@ export const getProjectResources = async (req, res) => {
       resources: resources.map((r) => ({
         id: r._id,
         name: r.name,
+        auth: r.auth,
         mockUrl: `${baseUrl}/${r.name}`,
         endpoints: r.spec?.endpoints || [],
         createdAt: r.createdAt,
       })),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+export const toggleAuth = async (req, res) => {
+  try {
+    const { resourceId } = req.params;
+    const userId = req.user.id;
+
+    // Fetch resource
+    const resource = await Resource.findById(resourceId);
+    if (!resource) {
+      return res.status(404).json({
+        success: false,
+        message: "Resource not found",
+      });
+    }
+
+    // Security: verify resource belongs to the authenticated user's project
+    const project = await Project.findOne({
+      _id: resource.projectId,
+      userId,
+    });
+    if (!project) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // Flip the auth flag
+    resource.auth = !resource.auth;
+    await resource.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Auth ${resource.auth ? 'enabled' : 'disabled'} for '${resource.name}'`,
+      auth: resource.auth,
     });
   } catch (err) {
     return res.status(500).json({

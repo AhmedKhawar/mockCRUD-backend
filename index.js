@@ -2,6 +2,7 @@ import express from "express"
 import { userRouter } from "./routes/userRoute.js"
 import { projectRouter } from "./routes/projectRoute.js"
 import { apiRouter } from "./routes/mock_data_Route.js"
+import { userOfferingRouter } from "./routes/userOfferingRoute.js"
 import mongoose from "mongoose"
 import cors from "cors"
 import { resourceRouter } from "./routes/resourceRoute.js"
@@ -18,6 +19,7 @@ app.use("/api", userRouter)
 app.use("/api", projectRouter)
 app.use("/api", resourceRouter)
 app.use("/m", apiRouter)
+app.use("/m", userOfferingRouter)
 
 app.get("/", (req, res) => {
   return res.json({

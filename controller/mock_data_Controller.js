@@ -1,6 +1,7 @@
 import Project from "../models/project.js";
 import Resource from "../models/resource.js";
 import MockData from "../models/mock_data.js";
+import jwt from "jsonwebtoken";
 
 export const mockAPI = async (req, res) => {
   try {
@@ -37,7 +38,22 @@ export const mockAPI = async (req, res) => {
       });
     }
 
-    // 4. Verify route and method exist in resource spec
+    // 4. If resource requires auth, verify the Bearer token
+    if (resourceDoc.auth) {
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
+
+      if (!token) {
+        return res.status(401).json({ error: "This resource requires authentication. No token provided." });
+      }
+
+      try {
+        jwt.verify(token, process.env.JWT_SECRET);
+      } catch {
+        return res.status(401).json({ error: "Invalid or expired token." });
+      }
+    }
+
     const targetPath = id ? `/${resourceName}/:id` : `/${resourceName}`;
     const endpointRule = resourceDoc.spec.endpoints.find(
       (ep) => ep.path === targetPath && ep.method === req.method
