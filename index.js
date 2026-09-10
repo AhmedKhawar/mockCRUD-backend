@@ -12,7 +12,24 @@ import 'dotenv/config'
 const app = express()
 app.use(express.json())
 app.use(cors())
-mongoose.connect(process.env.URL).then(() => console.log("Connection established with Mongo DB")).catch((err) => console.log("Error encountered while establishing connection with DB" + err));
+let isConnected = false;
+const connectDB = async () => {
+  if (isConnected) {
+    return;
+  }
+  try {
+    const db = await mongoose.connect(process.env.URL);
+    isConnected = db.connections[0].readyState;
+    console.log("Connection established with Mongo DB");
+  } catch (err) {
+    console.log("Error encountered while establishing connection with DB " + err);
+  }
+};
+
+app.use(async (req, res, next) => {
+  await connectDB();
+  next();
+});
 
 
 app.use("/api", userRouter)
