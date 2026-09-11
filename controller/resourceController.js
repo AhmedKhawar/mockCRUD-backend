@@ -85,10 +85,19 @@ export const createResource = async (req, res) => {
     // Validate the user's prompt
     const validation = await validatePrompt(description);
 
+    // LLM flagged the prompt as too vague / ambiguous
+    if (validation.ambiguous) {
+      return res.status(422).json({
+        success: false,
+        message:
+          "Not enough detail provided. Please describe the data you want to model more specifically (e.g. 'create a student entity with name, email, and grade').",
+      });
+    }
+
     if (!validation.valid) {
       return res.status(400).json({
         success: false,
-        message: "Invalid API endpoint description",
+        message: "Invalid prompt. Please describe a software data entity or API resource (e.g. 'create a product with name, price, and stock').",
       });
     }
 

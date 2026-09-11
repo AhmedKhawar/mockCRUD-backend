@@ -21,58 +21,98 @@ const extractJSON = (text) => {
 
 const SYSTEM_PROMPT = `You are a strict REST API architect and schema validator.
 
-Your ONLY job is to determine if the user's description is a genuine request to model a software data entity or resource for a REST API (e.g., users, products, orders, blog posts, comments, todos, invoices, employees, etc.).
+Your ONLY job is to analyse the user's description and decide whether it is a genuine request to model one or more software data entities / resources for a REST API.
 
-VALIDITY RULES — A prompt is VALID only when ALL of the following are true:
-1. It clearly refers to a software data model, database entity, or CRUD resource.
-2. It is phrased as a request to create, generate, or define an API resource, schema, or fields.
-3. The entity makes sense as a table/collection in a database (e.g., "users", "orders", "products").
+════════════════════════════════════════
+STEP 1 — CLASSIFY THE PROMPT
+════════════════════════════════════════
 
-INVALIDITY RULES — A prompt is INVALID when ANY of the following are true:
-1. It describes a real-world person, place, political figure, organization, or historical event (e.g., "president of pakistan", "eiffel tower", "world war 2").
-2. It is gibberish, random words, or has no clear meaning.
-3. It is a general question, opinion, or statement not related to building an API.
-4. It refers to a physical object or concept that would never be a REST API resource (e.g., "a chair", "pizza", "weather today").
-5. It is a creative writing prompt, joke, or off-topic request.
+Return "valid": false  when ANY of the following are true:
+  • It is a greeting, question, or general conversation (e.g. "how are you", "what's the weather", "who is the president of Pakistan").
+  • It refers to a real-world person, political figure, geographic place, or historical event.
+  • It is random words, gibberish, or has no coherent meaning.
+  • It refers to a physical, non-digital concept that would NEVER be a database entity (e.g. "chair", "pizza").
+  • It is a creative writing, joke, or off-topic request.
 
-If the prompt is valid:
-- Return the total number of entities/resources identified.
-- Return the name of every entity/resource.
-- Return the fields for every entity/resource.
-- If the user explicitly provides specific field names, use those exactly.
-- If the user provides some fields and asks for more, keep the user's fields and infer sensible additional ones.
-- If the user provides only an entity name without fields, infer sensible and commonly useful fields for that entity.
-- If the description clearly contains multiple entities, identify and return each separately.
-- Do NOT create a generic "id" field. MongoDB auto-generates _id. Fields like userId, productId, orderId are fine.
-- Field names must be single alphanumeric identifier words with no spaces or special characters.
-- Every field must have a type: string, number, boolean, array, or object.
-- Every entry in requiredFields must correspond to an existing field in that entity's properties.
-- Resource names must be lowercase plural names.
-- Do not output explanations, preambles, or any text outside the JSON.
+Return "valid": "ambiguous"  when:
+  • The word COULD be a REST API resource but is also commonly used in non-API contexts, AND the user has provided NO additional context to confirm intent.
+  • Examples: "president", "animal", "weather", "planet", "color".
+  • Rule: a single generic noun with zero API / system context → ambiguous.
 
-For an invalid prompt, return:
+Return "valid": true  when the prompt clearly describes one or more data entities for an API, schema, or database, even if the user wrote it as a system name (e.g. "student management system", "hospital management system", "e-commerce platform").
+
+════════════════════════════════════════
+STEP 2 — IDENTIFY RESOURCES  (only when valid: true)
+════════════════════════════════════════
+
+A. EXPLICIT RESOURCES — user names the entities (e.g. "course and student entity and an enrollment entity").
+   Count them exactly. Do not add or remove entities.
+
+B. SYSTEM-LEVEL PROMPTS — user gives a system name without listing entities (e.g. "student management system").
+   You must autonomously decide a sensible set of 2–5 resources that logically belong to that system.
+   Resources must be logically connected: junction/relational resources MUST contain the appropriate foreign-key fields
+   (e.g. an "enrollments" resource must have studentId and courseId fields of type string).
+
+════════════════════════════════════════
+STEP 3 — DETERMINE FIELDS  (only when valid: true)
+════════════════════════════════════════
+
+Follow the FIRST matching rule:
+
+1. USER PROVIDES EXPLICIT FIELDS → use those field names exactly; do not add or remove any unless rule 2 applies.
+2. USER PROVIDES SOME FIELDS + ASKS FOR MORE → keep every user-supplied field, then infer sensible additional ones.
+3. USER SPECIFIES A TOTAL COUNT (e.g. "5 fields") → generate exactly that many fields; pick the most appropriate ones.
+4. USER PROVIDES ONLY THE ENTITY NAME (e.g. "create user") → infer all fields and their count entirely on your own; choose what makes the most sense for that entity.
+
+════════════════════════════════════════
+HARD RULES (always enforced)
+════════════════════════════════════════
+• The field named exactly "id" (case-insensitive) is STRICTLY FORBIDDEN. Never generate it. MongoDB creates _id automatically. Fields like userId, productId, courseId, studentId are fine.
+• Field names must be single camelCase alphanumeric identifiers with no spaces or special characters.
+• Every field must have a type: string | number | boolean | array | object.
+• requiredFields must only contain names that also appear in that entity's properties list.
+• Resource names must be lowercase plural words (e.g. "students", "courses", "enrollments").
+• Do NOT output any explanation, preamble, or text outside the JSON object.
+
+════════════════════════════════════════
+OUTPUT FORMAT
+════════════════════════════════════════
+
+Invalid prompt:
 {
   "valid": false,
   "resourceCount": 0,
   "resources": []
 }
-For a valid prompt, return:
+
+Ambiguous prompt:
+{
+  "valid": "ambiguous",
+  "resourceCount": 0,
+  "resources": []
+}
+
+Valid prompt:
 {
   "valid": true,
-  "resourceCount": 1,
+  "resourceCount": 2,
   "resources": [
     {
       "resource": "students",
       "requiredFields": ["name", "email"],
       "properties": [
-        {
-          "fieldName": "name",
-          "fieldType": "string"
-        },
-        {
-          "fieldName": "email",
-          "fieldType": "string"
-        }
+        { "fieldName": "name",  "fieldType": "string" },
+        { "fieldName": "email", "fieldType": "string" },
+        { "fieldName": "age",   "fieldType": "number" }
+      ]
+    },
+    {
+      "resource": "enrollments",
+      "requiredFields": ["studentId", "courseId"],
+      "properties": [
+        { "fieldName": "studentId", "fieldType": "string" },
+        { "fieldName": "courseId",  "fieldType": "string" },
+        { "fieldName": "enrolledAt","fieldType": "string" }
       ]
     }
   ]
@@ -82,12 +122,13 @@ export const validatePrompt = async (promptText) => {
     if (!promptText || typeof promptText !== "string" || !promptText.trim()) {
         return {
             valid: false,
+            ambiguous: false,
             resourceCount: 0,
             resources: [],
         };
     }
 
-    // Free tier fallback chain avoiding safety-only checkpoints
+    // Free tier fallback chain
     const candidateModels = [
         "google/gemma-4-31b:free",
         "minimax/minimax-m3:free",
@@ -113,7 +154,7 @@ export const validatePrompt = async (promptText) => {
                         { role: "user", content: promptText },
                     ],
                     response_format: { type: "json_object" },
-                    temperature: 0.1,
+                    temperature: 0.15,
                 }),
             });
 
@@ -129,43 +170,68 @@ export const validatePrompt = async (promptText) => {
         }
     }
 
-    if (!parsed || !parsed.valid || !Array.isArray(parsed.resources) || parsed.resources.length === 0) {
-        return {
-            valid: false,
-            resourceCount: 0,
-            resources: [],
-        };
+    // Could not get any response
+    if (!parsed) {
+        return { valid: false, ambiguous: false, resourceCount: 0, resources: [] };
     }
 
-    const sanitizedResources = parsed.resources.map((item) => {
-        const resourceName = (item.resource || "items")
-            .toLowerCase()
-            .trim()
-            .replace(/[^a-z0-9]/g, "");
+    // Ambiguous prompt — LLM is saying "needs more detail"
+    if (parsed.valid === "ambiguous") {
+        return { valid: false, ambiguous: true, resourceCount: 0, resources: [] };
+    }
 
-        const properties = (item.properties || [])
-            .map((p) => ({
-                fieldName: typeof p.fieldName === "string" ? p.fieldName.trim().replace(/[^a-zA-Z0-9]/g, "") : "",
-                fieldType: ["string", "number", "boolean", "array", "object"].includes(p.fieldType)
-                    ? p.fieldType
-                    : "string",
-            }))
-            .filter((p) => p.fieldName.length > 0 && p.fieldName.toLowerCase() !== "id");
+    // Explicitly invalid or no resources returned
+    if (!parsed.valid || !Array.isArray(parsed.resources) || parsed.resources.length === 0) {
+        return { valid: false, ambiguous: false, resourceCount: 0, resources: [] };
+    }
 
-        const validFieldNames = new Set(properties.map((p) => p.fieldName));
-        const requiredFields = (item.requiredFields || [])
-            .map((f) => (typeof f === "string" ? f.trim().replace(/[^a-zA-Z0-9]/g, "") : ""))
-            .filter((f) => f.length > 0 && f.toLowerCase() !== "id" && validFieldNames.has(f));
+    // Sanitise resources
+    const sanitizedResources = parsed.resources
+        .map((item) => {
+            const resourceName = (item.resource || "items")
+                .toLowerCase()
+                .trim()
+                .replace(/[^a-z0-9]/g, "");
 
-        return {
-            resource: resourceName,
-            requiredFields,
-            properties,
-        };
-    });
+            const properties = (item.properties || [])
+                .map((p) => ({
+                    fieldName:
+                        typeof p.fieldName === "string"
+                            ? p.fieldName.trim().replace(/[^a-zA-Z0-9]/g, "")
+                            : "",
+                    fieldType: ["string", "number", "boolean", "array", "object"].includes(p.fieldType)
+                        ? p.fieldType
+                        : "string",
+                }))
+                // Hard-ban the literal field name "id" (case-insensitive)
+                .filter(
+                    (p) => p.fieldName.length > 0 && p.fieldName.toLowerCase() !== "id"
+                );
+
+            const validFieldNames = new Set(properties.map((p) => p.fieldName));
+            const requiredFields = (item.requiredFields || [])
+                .map((f) =>
+                    typeof f === "string" ? f.trim().replace(/[^a-zA-Z0-9]/g, "") : ""
+                )
+                .filter(
+                    (f) =>
+                        f.length > 0 &&
+                        f.toLowerCase() !== "id" &&
+                        validFieldNames.has(f)
+                );
+
+            return { resource: resourceName, requiredFields, properties };
+        })
+        // Drop any resource whose name sanitised to nothing
+        .filter((r) => r.resource.length > 0);
+
+    if (sanitizedResources.length === 0) {
+        return { valid: false, ambiguous: false, resourceCount: 0, resources: [] };
+    }
 
     return {
         valid: true,
+        ambiguous: false,
         resourceCount: sanitizedResources.length,
         resources: sanitizedResources,
     };
