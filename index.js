@@ -14,7 +14,7 @@ app.use(express.json())
 
 
 app.use(cors({
-  origin: "https://mockcrud.xyz",
+  origin: "https://www.mockcrud.xyz",
   credentials: true
 }));
 
