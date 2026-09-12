@@ -14,7 +14,7 @@ app.use(express.json())
 
 
 app.use(cors({
-  origin: "https://mock-crud-blond.vercel.app/",
+  origin: "https://mock-crud-blond.vercel.app",
   credentials: true
 }));
 
