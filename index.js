@@ -11,7 +11,15 @@ import 'dotenv/config'
 
 const app = express()
 app.use(express.json())
-app.use(cors())
+
+
+app.use(cors({
+  origin: "https://mock-crud-blond.vercel.app/",
+  credentials: true
+}));
+
+
+
 let isConnected = false;
 
 
