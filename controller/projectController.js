@@ -85,7 +85,7 @@ export const getUserProjects = async (req, res) => {
     console.log("Redis GET:", Date.now() - start, "ms");
 
     if (cached) {
-      onsole.log("CACHE HIT");
+      console.log("CACHE HIT");
       return res.status(200).json(cached);
     }
 
