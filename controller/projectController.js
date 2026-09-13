@@ -80,12 +80,16 @@ export const getUserProjects = async (req, res) => {
     const key = `projects:user:${userId}`;
 
     // Check Redis
+    const start = Date.now();
     const cached = await redis.get(key);
+    console.log("Redis GET:", Date.now() - start, "ms");
 
     if (cached) {
+      onsole.log("CACHE HIT");
       return res.status(200).json(cached);
     }
 
+    console.log("CACHE MISS");
     // Get from MongoDB
     const projects = await Project.find({ userId })
       .select("name slug settings createdAt updatedAt")
