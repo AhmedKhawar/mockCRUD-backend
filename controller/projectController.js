@@ -3,6 +3,7 @@ import Project from '../models/project.js';
 import Resource from '../models/resource.js';
 import MockData from '../models/mock_data.js';
 import 'dotenv/config'
+import { redis } from "../config/redis.js"
 
 // URL-safe lowercase alphabet and numbers
 const generateSlug = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 8);
@@ -20,6 +21,7 @@ export const createProject = async (req, res) => {
       slug,
     });
 
+    await redis.del(`projects:user:${userId}`);
     return res.status(201).json({
       success: true,
       message: 'Project created successfully',
@@ -58,6 +60,7 @@ export const removeProject = async (req, res) => {
       Project.findByIdAndDelete(project._id),
     ]);
 
+    await redis.del(`projects:user:${userId}`);
     return res.status(200).json({
       success: true,
       message: `Project '${project.name}' and all its resources were deleted`,
@@ -74,13 +77,22 @@ export const removeProject = async (req, res) => {
 export const getUserProjects = async (req, res) => {
   try {
     const userId = req.user.id;
+    const key = `projects:user:${userId}`;
 
-    // Fetch projects belonging to this authenticated user
+    // Check Redis
+    const cached = await redis.get(key);
+
+    if (cached) {
+      return res.status(200).json(cached);
+    }
+
+    // Get from MongoDB
     const projects = await Project.find({ userId })
       .select("name slug settings createdAt updatedAt")
       .sort({ createdAt: -1 });
 
-    return res.status(200).json({
+    // Format response
+    const response = {
       success: true,
       count: projects.length,
       projects: projects.map((p) => ({
@@ -90,7 +102,13 @@ export const getUserProjects = async (req, res) => {
         settings: p.settings,
         createdAt: p.createdAt,
       })),
-    });
+    };
+
+    // Save to Redis
+    await redis.set(key, response, { ex: 300 });
+
+    return res.status(200).json(response);
+
   } catch (err) {
     return res.status(500).json({
       success: false,
