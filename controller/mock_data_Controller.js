@@ -104,7 +104,7 @@ export const mockAPI = async (req, res) => {
           data: payload,
         });
 
-        return res.status(201).json({ id: newRecord._id, ...newRecord.data });
+        return res.status(201).json({ message: "Record added successfully",id: newRecord._id, ...newRecord.data });
       }
 
       case "PUT": {
@@ -135,7 +135,7 @@ export const mockAPI = async (req, res) => {
         );
 
         if (!updatedRecord) {
-          return res.status(404).json({ error: "Record not found" });
+          return res.status(404).json({ message: "Record updated successfully", error: "Record not found" });
         }
 
         return res.status(200).json({ id: updatedRecord._id, ...updatedRecord.data });
