@@ -135,10 +135,10 @@ export const mockAPI = async (req, res) => {
         );
 
         if (!updatedRecord) {
-          return res.status(404).json({ message: "Record updated successfully", error: "Record not found" });
+          return res.status(404).json({error: "Record not found" });
         }
 
-        return res.status(200).json({ id: updatedRecord._id, ...updatedRecord.data });
+        return res.status(200).json({ message: "Record updated successfully", id: updatedRecord._id, ...updatedRecord.data });
       }
 
       case "DELETE": {
