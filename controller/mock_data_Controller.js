@@ -119,19 +119,6 @@ export const mockAPI = async (req, res) => {
 
         const payload = req.body;
 
-        // Check required fields for update
-        const required = endpointRule.requiredFields || [];
-        const missingFields = required.filter(
-          (field) => payload[field] === undefined || payload[field] === null || payload[field] === ""
-        );
-
-        if (missingFields.length > 0) {
-          return res.status(422).json({
-            error: "Missing required fields",
-            missingFields,
-          });
-        }
-
         // Update record
         const updatedRecord = await MockData.findOneAndUpdate(
           { ...baseQuery, _id: id },
