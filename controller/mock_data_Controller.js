@@ -77,12 +77,8 @@ export const mockAPI = async (req, res) => {
         }
 
         // Fetch all records
-        const records = await MockData.find(baseQuery).lean();
-        const data = records.map((item)=> item.data);
-        return res.status(200).json({
-          allRecords: data,
-          totalCount: data.length
-        })
+        const records = await MockData.find(baseQuery);
+        return res.status(200).json(records.map((doc) => ({ id: doc._id, ...doc.data }), {totalCount: records.length}));
       }
 
       case "POST": {
