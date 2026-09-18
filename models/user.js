@@ -1,19 +1,19 @@
-import {model, Schema} from "mongoose"
+import { model, Schema } from "mongoose"
 
 const userSchema = new Schema({
-    email:{
-        type: String, 
+    email: {
+        type: String,
         unique: true,
         required: true
     },
 
-    password:{
+    password: {
         type: String,
-        required: true,
+        // removed required: true because google auth wont have password
         minLength: [8, "Password should be atleast 8 characters long"]
     }
 
-}, {timestamps: true})
+}, { timestamps: true })
 
 const User = model("User", userSchema);
 export default User;
