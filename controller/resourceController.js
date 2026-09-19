@@ -51,8 +51,8 @@ const buildSpec = (resource, requiredFields, properties) => {
 
 export const createResource = async (req, res) => {
   try {
-    const payload = req.body.payload || req.body;
-    const projectId = payload.projectId;
+    const body = req.body;
+    const projectId = body.projectId;
 
     if (!projectId) {
       return res.status(400).json({
@@ -73,8 +73,20 @@ export const createResource = async (req, res) => {
       });
     }
 
-    // Process either custom resources or natural language prompt
-    const validation = await validatePrompt(payload);
+    // Build a map of resourceName (lowercase) → auth so we can stamp each
+    // saved document with the correct auth flag from the frontend payload.
+    // Custom mode: read from body.resources[]; Infer mode: default false.
+    const authMap = {};
+    if (body.mode === "custom" && Array.isArray(body.resources)) {
+      for (const r of body.resources) {
+        if (r.name) {
+          authMap[r.name.toLowerCase().trim()] = r.auth === true;
+        }
+      }
+    }
+
+    // Pass the full body (minus projectId) to the LLM service
+    const validation = await validatePrompt(body);
 
     if (!validation.valid || validation.resources.length === 0) {
       return res.status(400).json({
@@ -103,11 +115,12 @@ export const createResource = async (req, res) => {
       });
     }
 
-    // Persist new resources
+    // Persist new resources — stamp auth from the authMap built above
     const newResources = await Resource.insertMany(
       specs.map((spec) => ({
         projectId: project._id,
         name: spec.resource,
+        auth: authMap[spec.resource] ?? false,
         spec,
       }))
     );
@@ -119,6 +132,7 @@ export const createResource = async (req, res) => {
         id: r._id,
         projectId: r.projectId,
         name: r.name,
+        auth: r.auth,
         spec: r.spec,
       })),
     });
@@ -129,6 +143,7 @@ export const createResource = async (req, res) => {
     });
   }
 };
+
 
 
 export const removeResource = async (req, res) => {

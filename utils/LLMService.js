@@ -26,89 +26,113 @@ const extractJSON = (text) => {
 
 // --- PROMPTS ---
 
-// Option 1: Validates user-defined JSON resources and infers missing fields/connections
-const CUSTOM_SYSTEM_PROMPT = `You are a strict REST API schema architect and JSON analyzer.
+// Option 1 — Pure custom mode: user supplied all resources, some with manual fields, some with inferFields:true
+const CUSTOM_SYSTEM_PROMPT = `You are a strict REST API schema architect.
 
-INPUT: You will receive a JSON ARRAY containing resource definitions in the USER PROMPT.
-Analyze the input data. Some resources have manual fields ("fields" array), while others have "inferFields": true.
-
-TASKS:
-1. VALIDATE NAMES: Ensure every "name" in the input is a sensible software data collection (lowercase plural, e.g., "users", "profiles"). If any name is gibberish, invalid, or inappropriate, set output "valid": false and stop.
-2. MANUAL FIELDS: For resources with a "fields" array, keep their "name", "type", and "required" status EXACTLY as provided. Do not modify.
-3. INFER FIELDS: For resources with "inferFields": true:
-   - Generate realistic fields matching the requested "count" (default to 3-5 if count is missing).
-   - INFER CONNECTIONS: Look at other resources in the input array. Automatically add logical foreign key fields. (E.g., if analyzing "profiles" and "Users" exists in input, automatically add { "name": "userId", "type": "String", "required": true }).
-4. HARD RULES:
-   - Field named exactly "id" is FORBIDDEN. MongoDB creates _id automatically. Use "userId", "productId".
-   - Field names must be camelCase alphanumeric.
-   - Types must be: "String", "Number", "Boolean", "Array", "Object".
-
-OUTPUT: Return STRICT JSON ONLY following this example format. Do not include explanations.
-{
-  "valid": true,
-  "resources": [
-    {
-      "resource": "users",
-      "requiredFields": ["username"],
-      "properties": [
-        { "fieldName": "username", "fieldType": "String" }
-      ]
-    }
-  ]
-}`;
-
-// Option 2: Full System Natural Language Prompt
-const INFER_SYSTEM_PROMPT = `You are an expert database architect and REST API spec generator.
-
-INPUT: The user will describe a system (e.g., "student management system") in the USER PROMPT.
+INPUT: A JSON array of resource definitions.
+Each item is either:
+  a) Manual  → has a 'fields' array  (keep those fields EXACTLY as given)
+  b) Inferred → has 'inferFields': true  (you must generate realistic fields; count hints the number wanted)
 
 TASKS:
-1. Determine 2 to 5 essential database resources (lowercase plural names) for this system.
-2. Infer necessary attributes, appropriate data types ("String", "Number", "Boolean", "Array", "Object"), and sensible required fields for each entity.
-3. INFER CONNECTIONS: Ensure entities contain foreign key attributes pointing to parent resources (e.g., an "orders" resource must contain a "userId" field).
-4. HARD RULE: Never generate a field named exactly "id". Use MongoDB compatible naming (e.g. userId).
+1. VALIDATE NAMES: Every 'name' must be a real-world software data entity (e.g. students, orders, products, invoices).
+   - Reject anything that is not a domain entity: greetings, weather questions, random words, nonsense.
+   - If ANY name is invalid set "valid": false and stop.
+2. MANUAL FIELDS: Keep 'name', 'type', and 'required' EXACTLY as given. Never alter them.
+3. INFER FIELDS: For inferFields:true items, generate sensible camelCase fields.
+   - Use the 'count' hint (default 4 if missing). Do NOT include exactly 'count' fields; treat it as a rough guide.
+   - Add foreign-key fields that logically connect to other resources in the same input array.
+4. CROSS-RESOURCE CONNECTIVITY: Analyse all resources together. Ensure related resources have matching foreign keys (e.g. if 'users' exists, an 'orders' resource should have a 'userId' field).
+5. HARD RULES:
+   - Field named exactly "id" is FORBIDDEN. Use compound names like userId, orderId.
+   - Field names: camelCase, alphanumeric only.
+   - Allowed types: String, Number, Boolean, Array, Object.
 
-OUTPUT: Return STRICT JSON ONLY following this example format. Do not include explanations.
+OUTPUT: Return STRICT JSON ONLY. No explanations.
 {
   "valid": true,
   "resources": [
     {
       "resource": "students",
-      "requiredFields": ["name"],
+      "requiredFields": ["fullName"],
       "properties": [
-        { "fieldName": "name", "fieldType": "String" }
+        { "fieldName": "fullName", "fieldType": "String" }
       ]
     }
   ]
 }`;
 
+
+// Option 2 — Full system inference: user typed a system name, AI figures everything out
+const INFER_SYSTEM_PROMPT = `You are an expert database architect and REST API spec generator.
+
+INPUT: The user describes a software system by name (e.g. 'student management system').
+
+STEP 1 — VALIDATE:
+  The input MUST describe a recognisable software system that can be modelled as a group of database entities.
+  Valid examples: hospital management system, e-commerce platform, library system, hotel booking app.
+  INVALID examples: 'how are you', 'what is the weather', random words, greetings, nonsense phrases.
+  If the input is NOT a valid system description, return: { "valid": false, "resources": [] }
+
+STEP 2 — DESIGN (only if valid):
+  1. Determine 2 to 5 essential database resources (lowercase plural names) for this system.
+  2. Infer sensible camelCase attributes with appropriate types (String, Number, Boolean, Array, Object) and required flags.
+  3. CROSS-RESOURCE CONNECTIVITY: Ensure child resources contain foreign key fields pointing to parent resources (e.g. orders must include a userId field if users exists).
+  4. HARD RULE: Never generate a field named exactly 'id'. Use descriptive compound names (userId, productId, etc.).
+
+OUTPUT: Return STRICT JSON ONLY. No explanations.
+{
+  "valid": true,
+  "resources": [
+    {
+      "resource": "students",
+      "requiredFields": ["fullName"],
+      "properties": [
+        { "fieldName": "fullName", "fieldType": "String" }
+      ]
+    }
+  ]
+}`;
+
+
 // --- MAIN SERVICE ---
 
 export const validatePrompt = async (payload) => {
-    // 1. Determine Mode and content
-    const isCustomMode = payload?.mode === "custom" && Array.isArray(payload?.resources);
+    const mode = payload?.mode;
+    const resources = payload?.resources;  // present in custom mode
+    const systemName = payload?.systemName; // present in infer mode
 
-    // If custom mode, userContent must be the JSON string of resources.
-    // Otherwise, use payload.prompt or the payload itself as a string.
-    const userContent = isCustomMode
-        ? JSON.stringify(payload.resources)
-        : String(payload?.prompt || payload || "");
-
-    if (!userContent || userContent.trim() === "" || userContent === "[]") {
-        return { valid: false, resources: [] };
-    }
-
-    // 2. Setup Prompt and User Instruction based on mode
     let systemPrompt;
     let finalUserPrompt;
 
-    if (isCustomMode) {
+    if (mode === "custom" && Array.isArray(resources) && resources.length > 0) {
+        // --- CUSTOM MODE ---
+        // Build a normalised description of every resource for the LLM.
+        // Manual resources carry their 'fields' array; inferred ones carry inferFields+count.
+        const inputForLLM = resources.map(r => {
+            if (r.inferFields) {
+                return { name: r.name, inferFields: true, count: r.count ?? 4 };
+            }
+            return {
+                name: r.name,
+                fields: (r.fields || []).map(f => ({
+                    name: f.name,
+                    type: f.type,
+                    required: f.required ?? false,
+                })),
+            };
+        });
         systemPrompt = CUSTOM_SYSTEM_PROMPT;
-        // We must explicitly tell the model the user prompt is JSON data to analyze
-        finalUserPrompt = `ANALYZE THIS JSON DATA ARRAY AND GENERATE SCHEMAS ACCORDING TO SYSTEM RULES:\n${userContent}`;
-    } else {
+        finalUserPrompt = `ANALYZE THIS JSON ARRAY AND GENERATE SCHEMAS:\n${JSON.stringify(inputForLLM)}`;
+
+    } else if (mode === "infer" && typeof systemName === "string" && systemName.trim().length > 0) {
+        // --- INFER MODE ---
         systemPrompt = INFER_SYSTEM_PROMPT;
-        finalUserPrompt = userContent; // Standard natural language prompt
+        finalUserPrompt = systemName.trim();
+
+    } else {
+        // Unknown or empty payload
+        return { valid: false, resources: [] };
     }
 
     // 3. Define Models (Updated to use reliable models for JSON analysis)
