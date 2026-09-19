@@ -3,7 +3,6 @@ import Project from "../models/project.js";
 import Resource from "../models/resource.js";
 import { validatePrompt } from "../utils/LLMService.js";
 
-// Builds a standard 5-endpoint REST spec from validated resource data
 const buildSpec = (resource, requiredFields, properties) => {
   const resourceName = resource.toLowerCase().trim();
   const singular = resourceName.endsWith("s")
@@ -36,7 +35,7 @@ const buildSpec = (resource, requiredFields, properties) => {
         method: "PUT",
         path: `/${resourceName}/:id`,
         description: `Update an existing ${singular} by ID`,
-        requiredFields,
+        // requiredFields omitted so updates are flexible
         properties,
       },
       {
@@ -49,11 +48,12 @@ const buildSpec = (resource, requiredFields, properties) => {
   };
 };
 
+
 export const createResource = async (req, res) => {
   try {
-    const { projectId, description } = req.body;
+    const payload = req.body.payload || req.body;
+    const projectId = payload.projectId;
 
-    // Validate project ID
     if (!projectId) {
       return res.status(400).json({
         success: false,
@@ -61,15 +61,6 @@ export const createResource = async (req, res) => {
       });
     }
 
-    // Validate description
-    if (!description || !description.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Prompt cannot be empty",
-      });
-    }
-
-    // Verify project exists and belongs to authenticated user
     const project = await Project.findOne({
       _id: projectId,
       userId: req.user.id,
@@ -82,92 +73,53 @@ export const createResource = async (req, res) => {
       });
     }
 
-    // Validate the user's prompt
-    const validation = await validatePrompt(description);
+    // Process either custom resources or natural language prompt
+    const validation = await validatePrompt(payload);
 
-    // LLM flagged the prompt as too vague / ambiguous
-    if (validation.ambiguous) {
-      return res.status(422).json({
-        success: false,
-        message:
-          "Not enough detail provided. Please describe the data you want to model more specifically (e.g. 'create a student entity with name, email, and grade').",
-      });
-    }
-
-    if (!validation.valid) {
+    if (!validation.valid || validation.resources.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Invalid prompt. Please describe a software data entity or API resource (e.g. 'create a product with name, price, and stock').",
+        message: "Invalid entity definitions or resource names.",
       });
     }
 
-    // Build specs locally — no extra API call needed
+    // Build REST specifications
     const specs = validation.resources.map((item) =>
       buildSpec(item.resource, item.requiredFields, item.properties)
     );
 
-    // Validate that every generated spec has a resource name
-    const invalidSpec = specs.find(
-      (item) =>
-        !item.resource ||
-        item.resource.toLowerCase().trim() === ""
-    );
+    const resourceNames = specs.map((s) => s.resource);
 
-    if (invalidSpec) {
-      return res.status(422).json({
-        success: false,
-        message: "Failed to resolve a valid resource name from prompt",
-      });
-    }
-
-    // Normalize resource names
-    const resourceNames = specs.map(
-      (item) => item.resource.toLowerCase().trim()
-    );
-
-    // Check for duplicate resource names within this request
-    const uniqueNames = new Set(resourceNames);
-
-    if (uniqueNames.size !== resourceNames.length) {
-      return res.status(409).json({
-        success: false,
-        message: "Duplicate resource names were generated",
-      });
-    }
-
-    // Check if any resource already exists in this project
-    const existingResources = await Resource.find({
+    // Collision check inside project
+    const existing = await Resource.find({
       projectId: project._id,
       name: { $in: resourceNames },
     }).select("name");
 
-    if (existingResources.length > 0) {
+    if (existing.length > 0) {
       return res.status(409).json({
         success: false,
-        message: `Resource(s) already exist: ${existingResources
-          .map((item) => item.name)
-          .join(", ")}`,
+        message: `Resource(s) already exist: ${existing.map((e) => e.name).join(", ")}`,
       });
     }
 
-    // Create all resources
+    // Persist new resources
     const newResources = await Resource.insertMany(
-      specs.map((spec, index) => ({
+      specs.map((spec) => ({
         projectId: project._id,
-        name: resourceNames[index],
+        name: spec.resource,
         spec,
       }))
     );
 
-    // Return created resources
     return res.status(201).json({
       success: true,
       message: "Resources created successfully",
-      resources: newResources.map((resource) => ({
-        id: resource._id,
-        projectId: resource.projectId,
-        name: resource.name,
-        spec: resource.spec,
+      resources: newResources.map((r) => ({
+        id: r._id,
+        projectId: r.projectId,
+        name: r.name,
+        spec: r.spec,
       })),
     });
   } catch (err) {
@@ -177,6 +129,7 @@ export const createResource = async (req, res) => {
     });
   }
 };
+
 
 export const removeResource = async (req, res) => {
   try {
