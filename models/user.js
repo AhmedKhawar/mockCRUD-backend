@@ -7,6 +7,11 @@ const userSchema = new Schema({
         required: true
     },
 
+    isGoogle:{
+        type: bool,
+        required: false
+    }
+
     password: {
         type: String,
         // removed required: true because google auth wont have password

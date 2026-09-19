@@ -121,7 +121,7 @@ export const googleAuth = async (req, res) => {
     if (!user) {
       user = await User.create({
         email,
-        password: "", // No password needed for Google Auth
+        isGoogle: true
       });
     }
 
