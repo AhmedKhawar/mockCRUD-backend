@@ -10,7 +10,7 @@ const userSchema = new Schema({
     isGoogle:{
         type: bool,
         required: false
-    }
+    },
 
     password: {
         type: String,
