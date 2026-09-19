@@ -8,8 +8,8 @@ const userSchema = new Schema({
     },
 
     isGoogle:{
-        type: bool,
-        required: false
+        type: Boolean,
+        default: false
     },
 
     password: {
