@@ -180,17 +180,14 @@ export const validatePrompt = async (payload) => {
 
     // Define Models
     const candidateModels = [
-        // Primary: Fast MoE with strict instruction following & JSON adherence
-        "deepseek/deepseek-v4-flash-0731:free",
+        // Primary: OpenRouter dynamic auto-router (smartly falls back to best free endpoint)
+        "openrouter/free",
 
-        // Secondary: High-throughput reasoning & orchestration
-        "nvidia/nemotron-3-super-120b-a12b:free",
+        // Secondary: High-throughput lightning orchestration
+        "nvidia/nemotron-3.5-lightning:free",
 
         // Fast fallback: Ultra-low latency MoE
-        "inclusionai/ling-3.0-flash-fin:free",
-
-        // OpenRouter dynamic router (smartly filters free endpoints by requested features)
-        "openrouter/free"
+        "inclusionai/ling-3.0-flash-fin:free"
     ];
 
     let parsed = null;
