@@ -115,12 +115,19 @@ export const createResource = async (req, res) => {
       });
     }
 
+    // Build aiAddedFields map from LLM validation result
+    const aiAddedMap = {};
+    for (const item of validation.resources) {
+      aiAddedMap[item.resource] = item.aiAddedFields || [];
+    }
+
     // Persist new resources — stamp auth from the authMap built above
     const newResources = await Resource.insertMany(
       specs.map((spec) => ({
         projectId: project._id,
         name: spec.resource,
         auth: authMap[spec.resource] ?? false,
+        aiAddedFields: aiAddedMap[spec.resource] || [],
         spec,
       }))
     );
@@ -133,6 +140,7 @@ export const createResource = async (req, res) => {
         projectId: r.projectId,
         name: r.name,
         auth: r.auth,
+        aiAddedFields: r.aiAddedFields || [],
         spec: r.spec,
       })),
     });

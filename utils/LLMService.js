@@ -26,76 +26,118 @@ const extractJSON = (text) => {
 
 // --- PROMPTS ---
 
-// Option 1 — Pure custom mode: user supplied all resources, some with manual fields, some with inferFields:true
+// Option 1 — Custom mode: user supplied resource names + fields.
+// AI validates names, keeps fields EXACTLY, and adds any missing FK fields for logical joins.
 const CUSTOM_SYSTEM_PROMPT = `You are a strict REST API schema architect.
 
-INPUT: A JSON array of resource definitions.
-Each item is either:
-  a) Manual  → has a 'fields' array  (keep those fields EXACTLY as given)
-  b) Inferred → has 'inferFields': true  (you must generate realistic fields)
+CONTEXT — MongoDB ID convention:
+  MongoDB auto-generates an "_id" field for every document. This is returned to API clients as "id".
+  Therefore:
+  - NEVER generate or allow a field named exactly "id".
+  - Foreign-key fields in child resources (e.g. "studentId" in "enrollments") are references to the MongoDB "_id" of the parent document.
+  - You do NOT need to add an "id" field to parent resources — it is auto-generated.
+
+INPUT: A JSON array of resource definitions. Each item has:
+  - "name": the resource name (must be a real-world data entity)
+  - "fields": array of { name, type, required } the user defined
 
 TASKS:
-1. VALIDATE NAMES: Every 'name' must be a real-world software data entity (e.g. students, orders, products, invoices).
-   - Reject anything that is not a domain entity: greetings, weather questions, random words, nonsense.
+1. VALIDATE NAMES: Every "name" must be a real-world software data entity (e.g. students, orders, products, invoices).
+   - Reject anything that is NOT a domain entity: greetings, weather questions, random words, nonsense.
    - If ANY name is invalid set "valid": false and stop.
-2. MANUAL FIELDS: Keep 'name', 'type', and 'required' EXACTLY as given. Never alter them.
-3. INFER FIELDS: For inferFields:true items:
-   - The 'count' value is the MINIMUM number of domain fields to generate (not counting FK fields). Generate AT LEAST that many. Default to 4 if count is missing.
-   - First generate the domain fields (at least 'count' of them), THEN add any foreign-key fields on top.
-4. CROSS-RESOURCE CONNECTIVITY: Analyse all resources together.
-   - Add foreign-key fields to link related resources (e.g. if 'students' exists and you are inferring 'enrollments', add studentId).
-   - ALL foreign-key fields you add MUST appear in that resource's 'requiredFields' array.
-5. HARD RULES:
-   - Field named exactly "id" is FORBIDDEN. Use compound names like userId, studentId.
+
+2. KEEP USER FIELDS EXACTLY: For each resource, preserve every field the user defined.
+   - Do NOT rename, remove, or alter user-supplied fields in any way.
+   - Treat user-supplied "required: true" fields as required; honour "required: false" as non-required.
+
+3. DETECT MISSING RELATIONAL JOINS: Analyse ALL resources together.
+   - If two or more resources form a logical parent→child or many-to-many relationship (e.g. students + courses → enrollments), check whether the child resource already contains the necessary foreign-key fields.
+   - If a needed FK field is MISSING, add it. Use the naming pattern: <parentSingular>Id (e.g. studentId, courseId).
+   - The FK field type is always "String" and it is always required.
+   - Mark every field YOU add with "aiAdded": true. User-supplied fields get "aiAdded": false.
+   - List the names of every field you added in "aiAddedFields" for that resource.
+
+4. HARD RULES:
+   - Field named exactly "id" is FORBIDDEN. Use compound names (userId, studentId, etc.).
    - Field names: camelCase, alphanumeric only.
    - Allowed types: String, Number, Boolean, Array, Object.
-   - requiredFields must only list names that exist in the properties array.
+   - "requiredFields" must only list names that exist in the "properties" array.
+   - "aiAddedFields" lists only the names of fields you injected; empty array [] if none.
 
-OUTPUT: Return STRICT JSON ONLY. No explanations.
+OUTPUT: Return STRICT JSON ONLY. No explanations, no markdown, no text before or after.
 {
   "valid": true,
   "resources": [
     {
       "resource": "enrollments",
-      "requiredFields": ["studentId", "courseId", "enrollmentDate"],
+      "requiredFields": ["enrollmentDate", "studentId", "courseId"],
+      "aiAddedFields": ["studentId", "courseId"],
       "properties": [
-        { "fieldName": "studentId",      "fieldType": "String" },
-        { "fieldName": "courseId",       "fieldType": "String" },
-        { "fieldName": "enrollmentDate", "fieldType": "String" },
-        { "fieldName": "grade",          "fieldType": "String" }
+        { "fieldName": "enrollmentDate", "fieldType": "String", "aiAdded": false },
+        { "fieldName": "grade",          "fieldType": "String", "aiAdded": false },
+        { "fieldName": "studentId",      "fieldType": "String", "aiAdded": true  },
+        { "fieldName": "courseId",       "fieldType": "String", "aiAdded": true  }
       ]
     }
   ]
 }`;
 
 
-
 // Option 2 — Full system inference: user typed a system name, AI figures everything out
 const INFER_SYSTEM_PROMPT = `You are an expert database architect and REST API spec generator.
 
-INPUT: The user describes a software system by name (e.g. 'student management system').
+CONTEXT — MongoDB ID convention (CRITICAL):
+  MongoDB auto-generates an "_id" field for every document. This is exposed to API clients as "id".
+  Therefore:
+  - NEVER generate a field named exactly "id" in any resource.
+  - Foreign-key fields in child resources (e.g. "studentId" in "enrollments") reference the MongoDB "_id" of the parent document. You do not need an explicit "id" field on parent resources.
+  - Example: if "students" and "courses" exist, the "enrollments" resource should have "studentId" and "courseId" fields. These are references to the auto-generated "_id" of the student and course documents respectively.
+
+INPUT: The user describes a software system by name (e.g. "student management system").
 
 STEP 1 — VALIDATE:
   The input MUST describe a recognisable software system that can be modelled as a group of database entities.
-  Valid examples: hospital management system, e-commerce platform, library system, hotel booking app.
-  INVALID examples: 'how are you', 'what is the weather', random words, greetings, nonsense phrases.
+  Valid examples: hospital management system, e-commerce platform, library system, hotel booking app, inventory tracker.
+  INVALID examples: "how are you", "what is the weather", random words, greetings, nonsense phrases.
   If the input is NOT a valid system description, return: { "valid": false, "resources": [] }
 
 STEP 2 — DESIGN (only if valid):
   1. Determine 2 to 5 essential database resources (lowercase plural names) for this system.
   2. Infer sensible camelCase attributes with appropriate types (String, Number, Boolean, Array, Object) and required flags.
-  3. CROSS-RESOURCE CONNECTIVITY: Ensure child resources contain foreign key fields pointing to parent resources (e.g. orders must include a userId field if users exists).
-  4. HARD RULE: Never generate a field named exactly 'id'. Use descriptive compound names (userId, productId, etc.).
+  3. CROSS-RESOURCE CONNECTIVITY: Ensure child resources contain foreign-key fields pointing to parent resources (e.g. "enrollments" must include "studentId" AND "courseId" if both "students" and "courses" exist).
+  4. Mark every foreign-key field you generate with "aiAdded": true. All other fields get "aiAdded": false.
+  5. List names of AI-added FK fields per resource in "aiAddedFields".
 
-OUTPUT: Return STRICT JSON ONLY. No explanations.
+HARD RULES:
+  - NEVER generate a field named exactly "id". Use descriptive compound names (userId, productId, etc.).
+  - All field names must be camelCase, alphanumeric only.
+  - Allowed types: String, Number, Boolean, Array, Object.
+  - "requiredFields" must only reference field names that exist in the "properties" array.
+  - "aiAddedFields" lists only the names of FK/relational fields you generated; empty [] if none.
+
+OUTPUT: Return STRICT JSON ONLY. No explanations, no markdown.
 {
   "valid": true,
   "resources": [
     {
       "resource": "students",
-      "requiredFields": ["fullName"],
+      "requiredFields": ["fullName", "email"],
+      "aiAddedFields": [],
       "properties": [
-        { "fieldName": "fullName", "fieldType": "String" }
+        { "fieldName": "fullName",  "fieldType": "String",  "aiAdded": false },
+        { "fieldName": "email",     "fieldType": "String",  "aiAdded": false },
+        { "fieldName": "phone",     "fieldType": "String",  "aiAdded": false }
+      ]
+    },
+    {
+      "resource": "enrollments",
+      "requiredFields": ["studentId", "courseId", "enrollmentDate"],
+      "aiAddedFields": ["studentId", "courseId"],
+      "properties": [
+        { "fieldName": "enrollmentDate", "fieldType": "String", "aiAdded": false },
+        { "fieldName": "grade",          "fieldType": "String", "aiAdded": false },
+        { "fieldName": "studentId",      "fieldType": "String", "aiAdded": true  },
+        { "fieldName": "courseId",       "fieldType": "String", "aiAdded": true  }
       ]
     }
   ]
@@ -114,21 +156,15 @@ export const validatePrompt = async (payload) => {
 
     if (mode === "custom" && Array.isArray(resources) && resources.length > 0) {
         // --- CUSTOM MODE ---
-        // Build a normalised description of every resource for the LLM.
-        // Manual resources carry their 'fields' array; inferred ones carry inferFields+count.
-        const inputForLLM = resources.map(r => {
-            if (r.inferFields) {
-                return { name: r.name, inferFields: true, count: r.count ?? 4 };
-            }
-            return {
-                name: r.name,
-                fields: (r.fields || []).map(f => ({
-                    name: f.name,
-                    type: f.type,
-                    required: f.required ?? false,
-                })),
-            };
-        });
+        // Each resource now always has { name, fields: [...] }. No inferFields.
+        const inputForLLM = resources.map(r => ({
+            name: r.name,
+            fields: (r.fields || []).map(f => ({
+                name: f.name,
+                type: f.type,
+                required: f.required ?? false,
+            })),
+        }));
         systemPrompt = CUSTOM_SYSTEM_PROMPT;
         finalUserPrompt = `ANALYZE THIS JSON ARRAY AND GENERATE SCHEMAS:\n${JSON.stringify(inputForLLM)}`;
 
@@ -142,7 +178,7 @@ export const validatePrompt = async (payload) => {
         return { valid: false, resources: [] };
     }
 
-    // 3. Define Models (Updated to use reliable models for JSON analysis)
+    // Define Models
     const candidateModels = [
         "rwkv/rwkv-7-2.9b",            // Currently reliable free model for JSON adherence
         "google/gemma-2-9b-it:free",  // Fallback
@@ -151,7 +187,7 @@ export const validatePrompt = async (payload) => {
 
     let parsed = null;
 
-    // 4. LLM Call Loop
+    // LLM Call Loop
     for (const model of candidateModels) {
         try {
             console.log(`Attempting generation with model: ${model}`);
@@ -169,7 +205,6 @@ export const validatePrompt = async (payload) => {
                         { role: "system", content: systemPrompt },
                         { role: "user", content: finalUserPrompt },
                     ],
-                    // response_format: { type: "json_object" }, // Many free models don't support this yet, extractJSON handles it.
                     temperature: 0.1, // Keep deterministic
                     max_tokens: 2000,
                 }),
@@ -201,12 +236,12 @@ export const validatePrompt = async (payload) => {
         }
     }
 
-    // 5. Check if any model succeeded
+    // Check if any model succeeded
     if (!parsed || parsed.valid !== true || !Array.isArray(parsed.resources)) {
         return { valid: false, resources: [] };
     }
 
-    // 6. Sanitization and Format Standardization
+    // Sanitization and Format Standardization
     try {
         const sanitizedResources = parsed.resources.map((item) => {
             // Standardize Resource Name: lowercase, plural, alphanumeric
@@ -218,11 +253,12 @@ export const validatePrompt = async (payload) => {
             // Ensure properties is an array
             const rawProperties = Array.isArray(item.properties) ? item.properties : [];
 
-            // Sanitize Properties
+            // Sanitize Properties — preserve aiAdded flag
             const properties = rawProperties
                 .map((p) => {
                     const fieldName = String(p?.fieldName || p?.name || "").trim().replace(/[^a-zA-Z0-9]/g, "");
                     const rawType = String(p?.fieldType || p?.type || "").toLowerCase();
+                    const aiAdded = p?.aiAdded === true;
 
                     // Standardize Types
                     let fieldType = "String"; // Default
@@ -231,7 +267,7 @@ export const validatePrompt = async (payload) => {
                     else if (["array", "list"].includes(rawType)) fieldType = "Array";
                     else if (["object", "json", "map"].includes(rawType)) fieldType = "Object";
 
-                    return { fieldName, fieldType };
+                    return { fieldName, fieldType, aiAdded };
                 })
                 // Filter out empty names or forbidden "id" literal
                 .filter((p) => p.fieldName.length > 0 && p.fieldName.toLowerCase() !== "id");
@@ -248,7 +284,16 @@ export const validatePrompt = async (payload) => {
                 // Must exist in properties, not empty, not "id"
                 .filter((f) => f.length > 0 && f.toLowerCase() !== "id" && validNames.has(f));
 
-            return { resource: resourceName, requiredFields, properties };
+            // Collect aiAddedFields — either from LLM output or derived from properties
+            const rawAiAdded = Array.isArray(item.aiAddedFields) ? item.aiAddedFields : [];
+            const aiAddedFields = rawAiAdded.length > 0
+                ? rawAiAdded
+                    .map(f => String(f).trim().replace(/[^a-zA-Z0-9]/g, ""))
+                    .filter(f => f.length > 0 && f.toLowerCase() !== "id" && validNames.has(f))
+                // Fallback: derive from properties that have aiAdded: true
+                : properties.filter(p => p.aiAdded).map(p => p.fieldName);
+
+            return { resource: resourceName, requiredFields, aiAddedFields, properties };
         })
             // Remove resources that ended up with no name
             .filter((r) => r.resource.length > 0);

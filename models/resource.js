@@ -24,6 +24,11 @@ const resourceSchema = new Schema(
       type: Schema.Types.Mixed,
       default: {},
     },
+
+    aiAddedFields: {
+      type: [String],
+      default: [],
+    },
   },
   { timestamps: true }
 );
