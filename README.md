@@ -212,3 +212,5 @@ The backend is configured for [Vercel](https://vercel.com) through `vercel.json`
 ## Author
 
 Built by [@AhmedKhawar](https://github.com/AhmedKhawar).
+
+Addition using ChatGPT
